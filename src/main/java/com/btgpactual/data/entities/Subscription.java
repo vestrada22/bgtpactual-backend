@@ -7,7 +7,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
-@Document
+@Document(collection = "subscriptions")
 @Data
 public class Subscription {
     @Id
@@ -16,4 +16,6 @@ public class Subscription {
     private String fundId;
     private BigDecimal amount;
     private LocalDateTime subscriptionDate;
+    private LocalDateTime cancellationDate;
+    private Boolean isActive;
 }

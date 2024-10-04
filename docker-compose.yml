@@ -1,0 +1,12 @@
+services:
+  bgtpactual:
+    image: mongo
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - bgtpactual_data:/data/db
+    container_name: bgtpactual
+
+volumes:
+  bgtpactual_data:

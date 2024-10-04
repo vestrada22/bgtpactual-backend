@@ -9,7 +9,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -29,9 +28,5 @@ public class TransactionService {
 
     public List<Transaction> getUserTransactions(String userId) {
         return transactionRepository.findByUserIdOrderByTimestampDesc(userId);
-    }
-
-    public Optional<Transaction> findLastSubscription(String userId, String fundId) {
-        return transactionRepository.findFirstByUserIdAndFundIdAndTypeOrderByTimestampDesc(userId, fundId, Transaction.TransactionType.SUBSCRIPTION);
     }
 }

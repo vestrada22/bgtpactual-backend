@@ -13,16 +13,11 @@ import java.math.BigDecimal;
 @NoArgsConstructor
 @Data
 public class FundSubscriptionRequestDto {
-    @NotNull(message = "User ID cannot be null")
-    @NotEmpty(message = "User ID cannot be empty")
-    private String userId;
-
-    @NotNull(message = "Fund ID cannot be null")
-    @NotEmpty(message = "Fund ID cannot be empty")
-    private String fundId;
-
     @NotNull(message = "Amount cannot be null")
     @DecimalMin(value = "0.01", message = "Amount must be greater than 0")
     private BigDecimal amount;
 
+    @NotNull(message = "Notification preference cannot be null or empty")
+    @NotEmpty(message = "Notification preference cannot be null or empty")
+    private String notificationPreference;
 }

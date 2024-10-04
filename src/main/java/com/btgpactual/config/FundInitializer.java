@@ -1,4 +1,4 @@
-package com.btgpactual.api.config;
+package com.btgpactual.config;
 
 import com.btgpactual.data.entities.Fund;
 import com.btgpactual.data.repositories.FundRepository;

@@ -14,7 +14,6 @@ public class UserService {
     private final UserRepository userRepository;
     private static final BigDecimal INITIAL_BALANCE = new BigDecimal("500000");
 
-    @Transactional
     public User getUser() {
         return userRepository.findAll().stream().findFirst()
                 .orElseGet(this::createInitialUser);

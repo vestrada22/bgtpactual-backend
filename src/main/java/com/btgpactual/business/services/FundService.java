@@ -1,7 +1,5 @@
 package com.btgpactual.business.services;
 
-import com.btgpactual.api.dto.FundCancelSubscriptionDto;
-import com.btgpactual.api.dto.FundSubscriptionRequestDto;
 import com.btgpactual.api.dto.TransactionRequestDto;
 import com.btgpactual.business.exceptions.*;
 import com.btgpactual.data.entities.Fund;
@@ -11,10 +9,15 @@ import com.btgpactual.data.entities.User;
 import com.btgpactual.data.repositories.FundRepository;
 import com.btgpactual.data.repositories.SubscriptionRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -25,66 +28,90 @@ public class FundService {
     private final TransactionService transactionService;
     private final NotificationService notificationService;
     private final SubscriptionRepository subscriptionRepository;
+    private final MongoTemplate mongoTemplate;
 
     public List<Fund> findAllFunds() {
         return fundRepository.findAll();
     }
 
     @Transactional
-    public Fund subscribeTo(FundSubscriptionRequestDto dto) {
+    public Transaction subscribeTo(String fundId, BigDecimal amount, String notificationPreference) {
         User user = userService.getUser();
-        Fund fund = fundRepository.findById(dto.getFundId())
+        user.setNotificationPreference(notificationPreference.equalsIgnoreCase("email") ? User.NotificationType.EMAIL : User.NotificationType.SMS);
+        Fund fund = fundRepository.findById(fundId)
                 .orElseThrow(() -> new FundNotFoundException("Fund not found"));
 
-        if (dto.getAmount().compareTo(fund.getMinimumAmount()) < 0) {
+        if (amount.compareTo(fund.getMinimumAmount()) < 0) {
             throw new MinimumAmountNotMetException("The minimum amount for this fund is " + fund.getMinimumAmount());
         }
 
-        if (user.getBalance().compareTo(dto.getAmount()) < 0) {
+        if (user.getBalance().compareTo(amount) < 0) {
             throw new InsufficientBalanceException("Insufficient balance");
         }
 
         TransactionRequestDto transactionRequestDto = new TransactionRequestDto();
         transactionRequestDto.setUserId(user.getId());
-        transactionRequestDto.setFundId(dto.getFundId());
-        transactionRequestDto.setAmount(dto.getAmount());
+        transactionRequestDto.setFundId(fundId);
+        transactionRequestDto.setAmount(amount);
         transactionRequestDto.setType(Transaction.TransactionType.SUBSCRIPTION);
 
-        userService.updateBalance(dto.getUserId(), dto.getAmount().negate());
+        userService.updateBalance(user.getId(), amount.negate());
         Transaction transaction = transactionService.recordTransaction(transactionRequestDto);
 
+        Subscription subscription = new Subscription();
+        subscription.setUserId(user.getId());
+        subscription.setFundId(fundId);
+        subscription.setAmount(amount);
+        subscription.setIsActive(true);
+        subscription.setSubscriptionDate(LocalDateTime.now());
+        subscriptionRepository.save(subscription);
+
         String message = String.format("You have successfully subscribed to the fund %s with an amount of %s. Transaction ID: %s",
-                fund.getName(), dto.getAmount(), transaction.getId());
+                fund.getName(), amount, transaction.getId());
         String subject = "Fund Subscription Confirmation";
         notificationService.sendNotification(user, subject, message);
-        return fund;
+        return transaction;
     }
 
     @Transactional
-    public Fund cancelSubscription(FundCancelSubscriptionDto dto) {
+    public Transaction cancelSubscription(String fundId) {
         User user = userService.getUser();
-        Fund fund = fundRepository.findById(dto.getFundId())
+        Fund fund = fundRepository.findById(fundId)
                 .orElseThrow(() -> new FundNotFoundException("Fund not found"));
 
-        Subscription subscription = subscriptionRepository.findByUserIdAndFundId(dto.getUserId(), dto.getFundId())
+        Subscription subscription = subscriptionRepository.findByUserIdAndFundIdAndIsActive(user.getId(), fundId, true)
                 .orElseThrow(() -> new SubscriptionNotFoundException("Subscription not found"));
 
         BigDecimal amountToReturn = subscription.getAmount();
 
+        Query query = new Query(Criteria.where("id").is(subscription.getId()));
+        Update subscriptionUpdate = new Update();
+
+        subscriptionUpdate.set("amount", new BigDecimal("0"));
+        subscriptionUpdate.set("isActive", false);
+        subscriptionUpdate.set("cancellationDate", LocalDateTime.now());
+
+        mongoTemplate.updateFirst(query, subscriptionUpdate, Subscription.class);
+
         TransactionRequestDto transactionRequestDto = new TransactionRequestDto();
         transactionRequestDto.setUserId(user.getId());
-        transactionRequestDto.setFundId(dto.getFundId());
+        transactionRequestDto.setFundId(fundId);
         transactionRequestDto.setAmount(fund.getMinimumAmount());
         transactionRequestDto.setType(Transaction.TransactionType.CANCELLATION);
 
         userService.updateBalance(user.getId(), amountToReturn);
-        Transaction cancellation = transactionService.recordTransaction(transactionRequestDto);
+        Transaction transaction = transactionService.recordTransaction(transactionRequestDto);
 
         String message = String.format("Your subscription to the fund %s has been cancelled. %s has been returned to your account. Transaction ID: %s",
-                fund.getName(), amountToReturn, cancellation.getId());
+                fund.getName(), amountToReturn, transaction.getId());
         String subject = "Cancel Subscription Confirmation";
         notificationService.sendNotification(user, subject,message);
 
-        return fund;
+        return transaction;
+    }
+
+    public List<Transaction> getTransactionHistory() {
+        User user = userService.getUser();
+        return transactionService.getUserTransactions(user.getId());
     }
 }
