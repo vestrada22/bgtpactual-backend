@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template for BTG Pactual Funds Application'
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name
+    Type: String
+    Default: Development
+
+Resources:
+  BTGPactualVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} VPC
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref BTGPactualVPC
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Public Subnet (AZ1)
+
+  BTGPactualSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http to client host
+      VpcId: !Ref BTGPactualVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+
+  BTGPactualInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0cff7528ff583bf9a  # Amazon Linux 2 AMI (HVM) - Kernel 5.10, SSD Volume Type
+      InstanceType: t2.micro
+      KeyName: bgtpactual-key  # Asegúrate de reemplazar esto con tu nombre de key pair
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: "0"
+          GroupSet:
+            - !Ref BTGPactualSecurityGroup
+          SubnetId: !Ref PublicSubnet1
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -e
+
+          # Actualizar el sistema e instalar dependencias
+          yum update -y
+          yum install -y java-11-amazon-corretto-devel git docker
+
+          # Iniciar y habilitar Docker
+          systemctl start docker
+          systemctl enable docker
+          usermod -a -G docker ec2-user
+
+          # Instalar Docker Compose
+          curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+          chmod +x /usr/local/bin/docker-compose
+
+          # Clonar el repositorio
+          git clone https://github.com/vestrada22/bgtpactual-backend.git /home/ec2-user/bgtpactual-backend
+          cd /home/ec2-user/bgtpactual-backend
+
+          # Construir la aplicación con Gradle
+          ./gradlew build
+
+          # Iniciar MongoDB con Docker Compose
+          docker-compose up -d
+
+          # Ejecutar la aplicación
+          nohup java -jar build/libs/funds-0.0.1-SNAPSHOT.jar > /home/ec2-user/application.log 2>&1 &
+
+          # Esperar a que la aplicación esté lista
+          until $(curl --output /dev/null --silent --head --fail http://localhost:8080); do
+              printf '.'
+              sleep 5
+          done
+
+          echo "Aplicación desplegada y en ejecución"
+
+Outputs:
+  PublicIp:
+    Description: Public IP address of the EC2 instance
+    Value: !GetAtt BTGPactualInstance.PublicIp
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicIp"
